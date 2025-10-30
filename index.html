@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SDGs 不塑永續-淨灘</title>
+  <style>
+    :root{--sand:#F4E1B4;--sea:#7EC8E3;--accent:#2B7A78}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,'Noto Sans TC',sans-serif}
+    body{background:linear-gradient(to top,var(--sand) 40%, var(--sea) 100%);display:flex;flex-direction:column}
+
+    header{display:flex;align-items:center;justify-content:space-between;padding:18px 24px}
+    .title{font-weight:800;font-size:20px;color:#0b3b3a}
+    .scorebox{font-weight:700;color:#054a4a}
+
+    /* 遊戲區 */
+    #game{position:relative;flex:1;overflow:hidden}
+
+    /* 波浪 (海邊) */
+    .waves{position:absolute;left:0;right:0;top:20%;height:50%;pointer-events:none}
+    .wave{position:absolute;left:0;right:0;height:60px;background:radial-gradient(circle at 50% 0%, rgba(255,255,255,0.35), rgba(255,255,255,0.05));transform:translateY(0)}
+
+    /* 垃圾圖示 */
+    .trash{position:absolute;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:center;transition:transform .25s ease,opacity .25s ease;}
+    .trash svg{display:block;pointer-events:none}
+
+    /* 不同大小 */
+    .size-sm{width:32px;height:32px}
+    .size-md{width:48px;height:48px}
+    .size-lg{width:72px;height:72px}
+
+    /* 點擊效果 */
+    .picked{opacity:0;transform:scale(.6) rotate(0deg)}
+
+    /* 分數面板 */
+    #hud{position:absolute;top:12px;right:12px;background:rgba(255,255,255,0.65);padding:8px 12px;border-radius:10px;backdrop-filter:blur(4px);box-shadow:0 2px 6px rgba(0,0,0,0.08)}
+
+    /* 完成訊息 */
+    .modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);}
+    .dialog{background:white;padding:28px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.18);text-align:center;max-width:360px}
+    .dialog h2{margin:0 0 12px}
+    .btn{display:inline-block;padding:8px 14px;border-radius:8px;border:none;background:var(--accent);color:white;text-decoration:none;cursor:pointer;margin-top:10px}
+
+    /* 小提示 */
+    .legend{position:absolute;left:12px;bottom:12px;background:rgba(255,255,255,0.75);padding:8px 12px;border-radius:10px;font-size:13px}
+
+    @media (max-width:520px){.title{font-size:18px}.size-lg{width:56px;height:56px}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">SDGs 不塑永續-淨灘</div>
+    <div id="score" class="scorebox">分數: 0 / 0</div>
+  </header>
+
+  <main id="game" aria-label="淨灘遊戲畫面">
+    <div class="waves" aria-hidden="true">
+      <div class="wave" style="top:0;opacity:.6"></div>
+      <div class="wave" style="top:60px;opacity:.4;transform:translateY(8px)"></div>
+      <div class="wave" style="top:120px;opacity:.25;transform:translateY(18px)"></div>
+    </div>
+
+    <div id="hud"></div>
+    <div class="legend">點選海灘上的垃圾以撿起並獲得分數。清完所有垃圾即完成任務！</div>
+  </main>
+
+  <template id="trash-template">
+    <div class="trash" role="button" tabindex="0">
+      <!-- svg 會由 JS 插入 -->
+    </div>
+  </template>
+
+  <script>
+    // 遊戲參數
+    const TOTAL = 50; // 垃圾數量
+    const game = document.getElementById('game');
+    const scoreEl = document.getElementById('score');
+
+    // 垃圾種類：name, svg (簡單示意), sizeClass, score
+    const TYPES = [
+      {name:'保特瓶', svg: bottlesvg(), size:'size-sm', pts:5},
+      {name:'紙類', svg: papersvg(), size:'size-sm', pts:4},
+      {name:'餐盒', svg: boxesvg(), size:'size-md', pts:8},
+      {name:'塑膠袋', svg: bagsvg(), size:'size-md', pts:6},
+      {name:'保麗龍', svg: foamsvg(), size:'size-md', pts:7},
+      {name:'飲料杯', svg: cupsvg(), size:'size-sm', pts:5},
+      {name:'漂流垃圾', svg: trashsvg(), size:'size-lg', pts:12}
+    ];
+
+    let score = 0; let collected = 0;
+
+    function rand(min,max){return Math.random()*(max-min)+min}
+
+    function placeItems(){
+      // update score header total
+      scoreEl.textContent = `分數: ${score} / 0`;
+
+      for(let i=0;i<TOTAL;i++){
+        const t = TYPES[Math.floor(Math.random()*TYPES.length)];
+        const el = document.createElement('div');
+        el.className = `trash ${t.size}`;
+        el.innerHTML = t.svg;
+        el.dataset.pts = t.pts;
+        el.dataset.name = t.name;
+
+        // 隨機旋轉
+        const rot = Math.floor(rand(0,360));
+        el.style.transform = `rotate(${rot}deg)`;
+
+        // 放在畫面下半部（50% 到 92%）並在左右側邊內縮5%
+        const vpW = window.innerWidth;
+        const vpH = window.innerHeight;
+        const minY = vpH*0.5; // 下半部開始
+        const maxY = vpH*0.92;
+        const minX = vpW*0.02;
+        const maxX = vpW*0.98;
+        const x = rand(minX,maxX);
+        const y = rand(minY,maxY);
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+
+        // 輕微漂浮動畫
+        const floatDur = rand(4,10);
+        el.style.transition = `transform .25s ease,opacity .25s ease, top ${floatDur}s ease-in-out`;
+
+        // click handler
+        el.addEventListener('click', onPick);
+        el.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' ') onPick.call(el,e) });
+
+        game.appendChild(el);
+      }
+      // set total in score UI (right top shows current/total)
+      scoreEl.textContent = `分數: ${score} / ${0}`; // we use separate HUD for numeric detail
+      updateHeaderCount();
+    }
+
+    function updateHeaderCount(){
+      const totalPts = Array.from(document.querySelectorAll('.trash')).reduce((s,el)=>s+parseInt(el.dataset.pts||0,10),0);
+      scoreEl.textContent = `分數: ${score} / ${totalPts}`;
+    }
+
+    function onPick(e){
+      if(this.classList.contains('picked')) return;
+      const pts = parseInt(this.dataset.pts||0,10);
+      score += pts;
+      collected += 1;
+      this.classList.add('picked');
+      // 動畫並移除
+      this.style.pointerEvents = 'none';
+      setTimeout(()=>{ this.remove(); updateHeaderCount(); checkWin(); },300);
+    }
+
+    function checkWin(){
+      const remaining = document.querySelectorAll('.trash').length;
+      if(remaining === 0){
+        showSuccess();
+      }
+    }
+
+    function showSuccess(){
+      const modal = document.createElement('div');
+      modal.className = 'modal';
+      modal.innerHTML = `\n        <div class="dialog">\n          <h2>任務成功！</h2>\n          <p>你已將海灘上的垃圾全部清理完畢。總分：${score}</p>\n          <button class="btn" id="nextBtn">前往下一關</button>\n          <button class="btn" id="retryBtn" style="background:#999;margin-left:8px">重玩此關</button>\n        </div>\n      `;
+      document.body.appendChild(modal);
+      document.getElementById('nextBtn').addEventListener('click', ()=>{ startNextLevel(); modal.remove(); });
+      document.getElementById('retryBtn').addEventListener('click', ()=>{ modal.remove(); resetGame(); });
+    }
+
+    function startNextLevel(){
+      // 下一關簡單機制：增加垃圾數量 + 隨機分數增幅
+      // 這裡我們簡單重新啟動但增加一些物件
+      alert('下一關暫時為重新挑戰，分數目標會依重新生成計算。');
+      resetGame();
+    }
+
+    function resetGame(){
+      // 清除現有垃圾與分數
+      score = 0; collected = 0;
+      document.querySelectorAll('.trash').forEach(n=>n.remove());
+      placeItems();
+    }
+
+    // 等待 DOM ready
+    window.addEventListener('load', ()=>{
+      // 先將 HUD 內容初始化
+      updateHeaderCount();
+      placeItems();
+    });
+
+    // 以下為各種簡單 svg 函式（以矢量示意垃圾圖示）
+    function bottlesvg(){ return `
+      <svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <rect x="22" y="6" width="20" height="10" rx="2" fill="#cde7ff" />
+        <rect x="18" y="16" width="28" height="36" rx="6" fill="#9fd0ff" />
+        <rect x="24" y="24" width="16" height="4" rx="2" fill="#eaf6ff" opacity="0.9" />
+      </svg>` }
+    function papersvg(){ return `
+      <svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <rect x="12" y="10" width="40" height="44" rx="3" fill="#fff8e6" stroke="#f0dca6"/>
+        <line x1="18" y1="22" x2="46" y2="22" stroke="#f0c87a" stroke-width="2"/>
+        <line x1="18" y1="30" x2="46" y2="30" stroke="#f0c87a" stroke-width="2"/>
+      </svg>` }
+    function boxesvg(){ return `
+      <svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <rect x="10" y="18" width="44" height="30" rx="3" fill="#ffd" stroke="#e6c86a"/>
+        <path d="M10 18 L32 6 L54 18" fill="#ffe6a8" stroke="#e6c86a"/>
+      </svg>` }
+    function bagsvg(){ return `
+      <svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 14 Q24 6 32 6 Q40 6 44 14 Q52 18 50 34 Q46 50 18 44 Q12 30 20 14 Z" fill="#ffdede" stroke="#f2bdbd"/>
+      </svg>` }
+    function foamsvg(){ return `
+      <svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <rect x="12" y="22" width="40" height="20" rx="4" fill="#fff" stroke="#ddd"/>
+        <text x="32" y="36" font-size="10" text-anchor="middle" fill="#bbb">EPS</text>
+      </svg>` }
+    function cupsvg(){ return `
+      <svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <rect x="18" y="18" width="28" height="24" rx="4" fill="#fff3d6" stroke="#f1d7a3" />
+        <rect x="22" y="12" width="20" height="6" rx="3" fill="#ffe9b8"/>
+      </svg>` }
+    function trashsvg(){ return `
+      <svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="26" fill="#d6e6d6" stroke="#bcd0b9"/>
+        <path d="M22 26 L42 26 L40 46 L24 46 Z" fill="#a5c297"/>
+      </svg>` }
+
+    // 監聽視窗 resize: 重新排列（簡單處理）
+    let resizeTimeout;
+    window.addEventListener('resize', ()=>{
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(()=>{
+        // 只需讓現有垃圾重新隨機擺放
+        document.querySelectorAll('.trash').forEach(el=>{
+          const vpW = window.innerWidth; const vpH = window.innerHeight;
+          const minY = vpH*0.5; const maxY = vpH*0.92; const minX=vpW*0.02; const maxX=vpW*0.98;
+          el.style.left = `${rand(minX,maxX)}px`;
+          el.style.top = `${rand(minY,maxY)}px`;
+        })
+      },120)
+    });
+  </script>
+</body>
+</html>
